@@ -106,6 +106,33 @@ async def update_opportunity_stage(opportunity_id: str, pipeline_id: str, stage_
         return resp.json()
 
 
+async def get_opportunities_in_stage(stage_id: str) -> list[dict]:
+    """Haal alle opportunities op die in een bepaald stage zitten."""
+    results = []
+    page = 1
+    async with httpx.AsyncClient(timeout=30) as client:
+        while True:
+            resp = await client.get(
+                f"{GHL_BASE}/opportunities/search",
+                headers=HEADERS,
+                params={
+                    "location_id": settings.ghl_location_id,
+                    "pipeline_id": settings.ghl_pipeline_id,
+                    "pipeline_stage_id": stage_id,
+                    "page": page,
+                    "limit": 100,
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            opps = data.get("opportunities", [])
+            results.extend(opps)
+            if len(opps) < 100:
+                break
+            page += 1
+    return results
+
+
 async def set_contact_pipeline_stage(contact_id: str, category: str) -> dict | None:
     """
     Zet het contact in het juiste GHL pipeline-vakje op basis van de AI-categorie.
@@ -118,11 +145,17 @@ async def set_contact_pipeline_stage(contact_id: str, category: str) -> dict | N
       - icp_gepland
     """
     stage_map = {
+        # Opgenomen gesprekken
         "geen_fit_geen_interesse": settings.stage_geen_fit_geen_interesse,
         "icp_geen_fit": settings.stage_icp_geen_fit,
         "icp_geen_interesse": settings.stage_icp_geen_interesse,
         "icp_niet_warm": settings.stage_icp_niet_warm,
         "icp_gepland": settings.stage_icp_gepland,
+        # Niet opgenomen
+        "dag1_niet_opgenomen": settings.stage_dag1_niet_opgenomen,
+        "dag2_niet_opgenomen": settings.stage_dag2_niet_opgenomen,
+        "dag3_niet_opgenomen": settings.stage_dag3_niet_opgenomen,
+        "nagebeld_niet_opgenomen": settings.stage_nagebeld_niet_opgenomen,
     }
 
     stage_id = stage_map.get(category)
