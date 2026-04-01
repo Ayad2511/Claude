@@ -24,6 +24,10 @@ class Settings(BaseSettings):
     stage_icp_niet_warm: str
     stage_icp_gepland: str
 
+    # === Slack dagrapport ===
+    slack_webhook_url: str = ""          # Incoming Webhook URL van je Slack app
+    daily_report_time: str = "18:00"     # Tijdstip dagrapport (HH:MM, 24-uurs)
+
     # === Webhook beveiliging (optioneel) ===
     webhook_secret: str = ""
 
