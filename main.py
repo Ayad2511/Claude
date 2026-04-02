@@ -119,11 +119,7 @@ async def call_completed_webhook(request: Request, background_tasks: BackgroundT
             raise HTTPException(status_code=401, detail="Ongeldige webhook signature")
 
     payload = await request.json()
-    event_type = payload.get("type", "")
-    print(f"[Webhook] Ontvangen: {event_type}")
-
-    if "call" not in event_type.lower() and "conversation" not in event_type.lower():
-        return JSONResponse({"status": "genegeerd", "reden": f"Event type: {event_type}"})
+    print(f"[Webhook] Volledige payload: {payload}")
 
     daily_stats["total_webhooks"] += 1
     background_tasks.add_task(process_call, payload)
@@ -157,7 +153,6 @@ async def process_call(payload: dict):
         conversation_id = (
             payload.get("conversationId")
             or payload.get("conversation_id")
-            or payload.get("id")
         )
         contact_id = (
             payload.get("contactId")
@@ -167,6 +162,7 @@ async def process_call(payload: dict):
         contact_name = (
             payload.get("contactName")
             or payload.get("contact_name")
+            or payload.get("full_name")
             or payload.get("contact", {}).get("name", "")
         )
         message_id = payload.get("messageId") or payload.get("message_id")
@@ -178,11 +174,11 @@ async def process_call(payload: dict):
             or ""
         )
 
-        if not conversation_id or not contact_id:
-            print(f"[Verwerking] Ontbrekende IDs in payload")
+        if not contact_id:
+            print(f"[Verwerking] Geen contact_id in payload, overslagen")
             return
 
-        print(f"[Verwerking] Gesprek {conversation_id} – {contact_name or contact_id} (status: {call_status or '?'})")
+        print(f"[Verwerking] Contact: {contact_name or contact_id} | Gesprek: {conversation_id or '?'} | Status: {call_status or '?'}")
 
         # ── Niet opgenomen ──────────────────────────────────────
         if _is_no_answer(payload, call_status):
@@ -191,16 +187,15 @@ async def process_call(payload: dict):
             return
 
         # ── Opname ophalen ──────────────────────────────────────
-        if not recording_url:
+        if not recording_url and conversation_id:
             if not message_id:
                 messages = await ghl_client.get_conversation_messages(conversation_id)
                 call_messages = [m for m in messages if m.get("type") in ("TYPE_CALL", "Call", "call")]
-                if not call_messages:
-                    print(f"[Verwerking] Geen gespreksberichten gevonden")
-                    return
-                message_id = call_messages[-1]["id"]
+                if call_messages:
+                    message_id = call_messages[-1]["id"]
 
-            recording_url = await ghl_client.get_call_recording_url(conversation_id, message_id)
+            if message_id:
+                recording_url = await ghl_client.get_call_recording_url(conversation_id, message_id)
 
         if not recording_url:
             # Geen opname én geen duidelijke 'niet opgenomen' status → behandel als niet opgenomen
