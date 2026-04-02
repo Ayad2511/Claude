@@ -26,6 +26,19 @@ async def get_conversation_messages(conversation_id: str) -> list[dict]:
         return data.get("messages", {}).get("messages", [])
 
 
+async def get_message_details(message_id: str) -> dict:
+    """Haal de volledige details van een enkel bericht op."""
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.get(
+            f"{GHL_BASE}/conversations/messages/{message_id}",
+            headers=HEADERS,
+        )
+        if resp.status_code in (404, 422):
+            return {}
+        resp.raise_for_status()
+        return resp.json()
+
+
 async def get_call_recording(message_id: str) -> bytes | None:
     """
     Haal de opname op voor een gespreksbericht.

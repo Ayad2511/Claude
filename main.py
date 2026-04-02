@@ -209,22 +209,26 @@ async def process_call(payload: dict):
                 mid = msg.get("id")
                 if not mid:
                     continue
-                # Log volledige berichtstructuur voor debugging
-                print(f"[Verwerking] Bericht {mid} keys: {list(msg.keys())} | meta: {msg.get('meta')} | attachments: {msg.get('attachments')} | url: {msg.get('url')}")
-                # Controleer eerst of de URL al in het bericht zit
+                # Haal volledige berichtdetails op (bevat meer velden dan de lijst)
+                details = await ghl_client.get_message_details(mid)
+                print(f"[Verwerking] Bericht {mid} (type {msg.get('type')}) details: {details}")
+
+                # Zoek opname-URL in berichtdetails
                 inline_url = (
-                    msg.get("url")
-                    or (msg.get("meta") or {}).get("url")
-                    or (msg.get("meta") or {}).get("recordingUrl")
+                    details.get("url")
+                    or details.get("recordingUrl")
+                    or (details.get("meta") or {}).get("url")
+                    or (details.get("meta") or {}).get("recordingUrl")
+                    or details.get("body") if str(details.get("body", "")).startswith("http") else None
                 )
                 if inline_url:
-                    print(f"[Verwerking] Opname-URL gevonden in bericht: {inline_url}")
+                    print(f"[Verwerking] Opname-URL in bericht: {inline_url}")
                     audio_bytes = await ghl_client.download_from_url(inline_url)
                     if audio_bytes:
                         print(f"[Verwerking] Opname gedownload ({len(audio_bytes)} bytes)")
                         break
-                # Anders via recording endpoint proberen
-                print(f"[Verwerking] Probeer recording endpoint voor bericht {mid} (type {msg.get('type')})")
+
+                # Via recording endpoint proberen
                 audio_bytes = await ghl_client.get_call_recording(mid)
                 if audio_bytes:
                     print(f"[Verwerking] Opname gevonden via endpoint ({len(audio_bytes)} bytes)")
