@@ -93,7 +93,7 @@ async def get_contact_recent_conversations(contact_id: str) -> list[dict]:
         return data.get("conversations", [])
 
 
-(contact_id: str, pipeline_id: str, stage_id: str, name: str) -> dict:
+async def create_opportunity(contact_id: str, pipeline_id: str, stage_id: str, name: str) -> dict:
     """Maak een nieuwe opportunity aan als die nog niet bestaat."""
     async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.post(
