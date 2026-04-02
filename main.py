@@ -178,6 +178,15 @@ async def process_call(payload: dict):
             print(f"[Verwerking] Geen contact_id in payload, overslagen")
             return
 
+        # Payload heeft geen beldata → geen call-webhook, overslaan
+        has_call_data = bool(
+            call_status or recording_url or message_id or conversation_id
+            or payload.get("callDuration") or payload.get("call_duration")
+        )
+        if not has_call_data:
+            print(f"[Verwerking] Geen beldata in payload (verkeerde workflow trigger?), overslagen")
+            return
+
         print(f"[Verwerking] Contact: {contact_name or contact_id} | Gesprek: {conversation_id or '?'} | Status: {call_status or '?'}")
 
         # ── Niet opgenomen ──────────────────────────────────────

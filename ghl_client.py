@@ -64,8 +64,12 @@ async def get_contact_opportunities(contact_id: str) -> list[dict]:
     """Haal alle opportunities (pipeline entries) op voor een contact."""
     async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.get(
-            f"{GHL_BASE}/contacts/{contact_id}/opportunities",
+            f"{GHL_BASE}/opportunities/search",
             headers=HEADERS,
+            params={
+                "location_id": settings.ghl_location_id,
+                "contact_id": contact_id,
+            },
         )
         resp.raise_for_status()
         data = resp.json()
