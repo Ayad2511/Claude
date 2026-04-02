@@ -212,6 +212,12 @@ async def process_call(payload: dict):
                 # Haal volledige berichtdetails op (bevat meer velden dan de lijst)
                 details = await ghl_client.get_message_details(mid)
 
+                # Sla te korte gesprekken over (< 30 seconden = niet écht gesprek)
+                duration = (details.get("message") or {}).get("meta", {}).get("call", {}).get("duration", 999)
+                if duration < 30:
+                    print(f"[Verwerking] Gesprek te kort ({duration}s), overgeslagen")
+                    continue
+
                 # Zoek opname-URL in berichtdetails
                 inline_url = (
                     details.get("url")
