@@ -211,7 +211,6 @@ async def process_call(payload: dict):
                     continue
                 # Haal volledige berichtdetails op (bevat meer velden dan de lijst)
                 details = await ghl_client.get_message_details(mid)
-                print(f"[Verwerking] Bericht {mid} (type {msg.get('type')}) details: {details}")
 
                 # Zoek opname-URL in berichtdetails
                 inline_url = (
