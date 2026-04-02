@@ -76,7 +76,24 @@ async def get_contact_opportunities(contact_id: str) -> list[dict]:
         return data.get("opportunities", [])
 
 
-async def create_opportunity(contact_id: str, pipeline_id: str, stage_id: str, name: str) -> dict:
+async def get_contact_recent_conversations(contact_id: str) -> list[dict]:
+    """Haal recente gesprekken op voor een contact via de search API."""
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.get(
+            f"{GHL_BASE}/conversations/search",
+            headers=HEADERS,
+            params={
+                "locationId": settings.ghl_location_id,
+                "contactId": contact_id,
+                "limit": 5,
+            },
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return data.get("conversations", [])
+
+
+(contact_id: str, pipeline_id: str, stage_id: str, name: str) -> dict:
     """Maak een nieuwe opportunity aan als die nog niet bestaat."""
     async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.post(

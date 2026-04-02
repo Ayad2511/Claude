@@ -178,36 +178,42 @@ async def process_call(payload: dict):
             print(f"[Verwerking] Geen contact_id in payload, overslagen")
             return
 
-        # Payload heeft geen beldata → geen call-webhook, overslaan
-        has_call_data = bool(
-            call_status or recording_url or message_id or conversation_id
-            or payload.get("callDuration") or payload.get("call_duration")
-        )
-        if not has_call_data:
-            print(f"[Verwerking] Geen beldata in payload (verkeerde workflow trigger?), overslagen")
-            return
+        print(f"[Verwerking] Contact: {contact_name or contact_id} | Status: {call_status or '?'}")
 
-        print(f"[Verwerking] Contact: {contact_name or contact_id} | Gesprek: {conversation_id or '?'} | Status: {call_status or '?'}")
-
-        # ── Niet opgenomen ──────────────────────────────────────
+        # ── Niet opgenomen (expliciete status) ─────────────────
         if _is_no_answer(payload, call_status):
             await _handle_no_answer(contact_id, contact_name)
             daily_stats["niet_opgenomen"] += 1
             return
 
-        # ── Opname ophalen ──────────────────────────────────────
+        # ── Opname zoeken ───────────────────────────────────────
+        # Stap 1: conversation_id uit payload of via API opzoeken
+        if not conversation_id:
+            print(f"[Verwerking] Geen conversation_id in payload, zoek op via API...")
+            conversations = await ghl_client.get_contact_recent_conversations(contact_id)
+            for conv in conversations:
+                conv_id = conv.get("id")
+                if not conv_id:
+                    continue
+                msgs = await ghl_client.get_conversation_messages(conv_id)
+                call_msgs = [m for m in msgs if m.get("type") in ("TYPE_CALL", "Call", "call")]
+                if call_msgs:
+                    conversation_id = conv_id
+                    message_id = call_msgs[-1]["id"]
+                    print(f"[Verwerking] Gesprek gevonden via API: {conversation_id}")
+                    break
+
+        # Stap 2: recording_url ophalen
         if not recording_url and conversation_id:
             if not message_id:
-                messages = await ghl_client.get_conversation_messages(conversation_id)
-                call_messages = [m for m in messages if m.get("type") in ("TYPE_CALL", "Call", "call")]
-                if call_messages:
-                    message_id = call_messages[-1]["id"]
-
+                msgs = await ghl_client.get_conversation_messages(conversation_id)
+                call_msgs = [m for m in msgs if m.get("type") in ("TYPE_CALL", "Call", "call")]
+                if call_msgs:
+                    message_id = call_msgs[-1]["id"]
             if message_id:
                 recording_url = await ghl_client.get_call_recording_url(conversation_id, message_id)
 
         if not recording_url:
-            # Geen opname én geen duidelijke 'niet opgenomen' status → behandel als niet opgenomen
             print(f"[Verwerking] Geen opname gevonden → als niet opgenomen behandelen")
             await _handle_no_answer(contact_id, contact_name)
             daily_stats["niet_opgenomen"] += 1
