@@ -191,12 +191,15 @@ async def process_call(payload: dict):
         if not conversation_id:
             print(f"[Verwerking] Geen conversation_id in payload, zoek op via API...")
             conversations = await ghl_client.get_contact_recent_conversations(contact_id)
+            print(f"[Verwerking] {len(conversations)} gesprek(ken) gevonden via API")
             for conv in conversations:
                 conv_id = conv.get("id")
                 if not conv_id:
                     continue
                 msgs = await ghl_client.get_conversation_messages(conv_id)
-                call_msgs = [m for m in msgs if m.get("type") in ("TYPE_CALL", "Call", "call")]
+                msg_types = [m.get("type") for m in msgs]
+                print(f"[Verwerking] Gesprek {conv_id}: {len(msgs)} bericht(en), types: {msg_types}")
+                call_msgs = [m for m in msgs if m.get("type") in ("TYPE_CALL", "Call", "call", 1, "1")]
                 if call_msgs:
                     conversation_id = conv_id
                     message_id = call_msgs[-1]["id"]
@@ -207,7 +210,7 @@ async def process_call(payload: dict):
         if not recording_url and conversation_id:
             if not message_id:
                 msgs = await ghl_client.get_conversation_messages(conversation_id)
-                call_msgs = [m for m in msgs if m.get("type") in ("TYPE_CALL", "Call", "call")]
+                call_msgs = [m for m in msgs if m.get("type") in ("TYPE_CALL", "Call", "call", 1, "1")]
                 if call_msgs:
                     message_id = call_msgs[-1]["id"]
             if message_id:
