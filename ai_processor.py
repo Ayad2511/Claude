@@ -70,7 +70,6 @@ def analyze_transcript(transcript: str, contact_name: str = "") -> dict:
     response = claude_client.messages.create(
         model="claude-opus-4-6",
         max_tokens=1024,
-        thinking={"type": "adaptive"},
         system=SYSTEM_PROMPT,
         messages=[{"role": "user", "content": user_message}],
     )
