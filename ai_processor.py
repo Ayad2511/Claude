@@ -37,12 +37,18 @@ Je taken:
    - JA: de lead noemt de video, verwijst naar inhoud, of toont duidelijk voorkennis
    - NEE: de lead weet niet waar het over gaat, herinnert zich niets, of reageert alsof alles nieuw is
    - WAARSCHIJNLIJK JA / WAARSCHIJNLIJK NEE: als het niet duidelijk is, schat dan in op basis van hoe warm/geïnformeerd de lead is
+   - Als de transcriptie te kort is om dit te beoordelen, gebruik dan "waarschijnlijk nee"
 3. Categoriseer de lead in één van deze vijf vakjes:
    - geen_fit_geen_interesse  → Contact is geen ICP én heeft geen interesse
    - icp_geen_fit             → Contact is een ICP-profiel, maar is geen goede fit (bijv. verkeerde situatie, budget, timing)
    - icp_geen_interesse       → Contact is een ICP-profiel, maar heeft nu geen interesse
    - icp_niet_warm            → Contact is een ICP-profiel, heeft interesse, maar is nog niet warm genoeg
-   - icp_gepland              → Contact is een ICP-profiel en er is een afspraak of vervolgstap ingepland
+   - icp_gepland              → Contact is een ICP-profiel en er is een EXPLICIETE afspraak of vervolgstap ingepland
+
+BELANGRIJK:
+- Gebruik icp_gepland ALLEEN als er letterlijk een afspraak, datum, of concrete vervolgstap is afgesproken in het gesprek
+- Als de transcriptie te kort of onduidelijk is om goed te beoordelen, kies dan icp_niet_warm en vermeld dit in de reden
+- Gok nooit op icp_gepland als dit niet duidelijk uit de tekst blijkt
 
 Geef je antwoord ALTIJD in dit exacte JSON-formaat:
 {
