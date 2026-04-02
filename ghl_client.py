@@ -52,6 +52,15 @@ async def get_call_recording(message_id: str) -> bytes | None:
             return resp.content if len(resp.content) > 1000 else None
 
 
+async def download_from_url(url: str) -> bytes | None:
+    """Download audio van een directe URL."""
+    async with httpx.AsyncClient(timeout=120, follow_redirects=True) as client:
+        resp = await client.get(url, headers={"Authorization": f"Bearer {settings.ghl_api_key}"})
+        if resp.status_code != 200:
+            return None
+        return resp.content if len(resp.content) > 1000 else None
+
+
 async def add_contact_note(contact_id: str, note_body: str) -> dict:
     """Voeg een notitie toe aan het contact in GHL."""
     async with httpx.AsyncClient(timeout=30) as client:

@@ -209,10 +209,25 @@ async def process_call(payload: dict):
                 mid = msg.get("id")
                 if not mid:
                     continue
-                print(f"[Verwerking] Probeer opname voor bericht {mid} (type {msg.get('type')})")
+                # Log volledige berichtstructuur voor debugging
+                print(f"[Verwerking] Bericht {mid} keys: {list(msg.keys())} | meta: {msg.get('meta')} | attachments: {msg.get('attachments')} | url: {msg.get('url')}")
+                # Controleer eerst of de URL al in het bericht zit
+                inline_url = (
+                    msg.get("url")
+                    or (msg.get("meta") or {}).get("url")
+                    or (msg.get("meta") or {}).get("recordingUrl")
+                )
+                if inline_url:
+                    print(f"[Verwerking] Opname-URL gevonden in bericht: {inline_url}")
+                    audio_bytes = await ghl_client.download_from_url(inline_url)
+                    if audio_bytes:
+                        print(f"[Verwerking] Opname gedownload ({len(audio_bytes)} bytes)")
+                        break
+                # Anders via recording endpoint proberen
+                print(f"[Verwerking] Probeer recording endpoint voor bericht {mid} (type {msg.get('type')})")
                 audio_bytes = await ghl_client.get_call_recording(mid)
                 if audio_bytes:
-                    print(f"[Verwerking] Opname gevonden in bericht {mid} ({len(audio_bytes)} bytes)")
+                    print(f"[Verwerking] Opname gevonden via endpoint ({len(audio_bytes)} bytes)")
                     break
             if audio_bytes:
                 break
