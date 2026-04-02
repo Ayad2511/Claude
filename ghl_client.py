@@ -26,26 +26,30 @@ async def get_conversation_messages(conversation_id: str) -> list[dict]:
         return data.get("messages", {}).get("messages", [])
 
 
-async def get_call_recording_url(conversation_id: str, message_id: str) -> str | None:
-    """Haal de opname-URL op voor een specifiek gespreksbericht."""
-    async with httpx.AsyncClient(timeout=30) as client:
-        resp = await client.get(
-            f"{GHL_BASE}/conversations/messages/{message_id}/locations/{settings.ghl_location_id}/recording",
-            headers=HEADERS,
-        )
-        if resp.status_code == 404:
+async def get_call_recording(message_id: str) -> bytes | None:
+    """
+    Haal de opname op voor een gespreksbericht.
+    GHL kan zowel JSON met URL teruggeven als de audio direct als binary.
+    Geeft de audio bytes terug of None als er geen opname is.
+    """
+    url = f"{GHL_BASE}/conversations/messages/{message_id}/locations/{settings.ghl_location_id}/recording"
+    async with httpx.AsyncClient(timeout=120, follow_redirects=True) as client:
+        resp = await client.get(url, headers=HEADERS)
+        if resp.status_code in (404, 422):
             return None
         resp.raise_for_status()
-        data = resp.json()
-        return data.get("url")
-
-
-async def download_recording(url: str) -> bytes:
-    """Download het audiobestand van de opname-URL."""
-    async with httpx.AsyncClient(timeout=120, follow_redirects=True) as client:
-        resp = await client.get(url, headers={"Authorization": f"Bearer {settings.ghl_api_key}"})
-        resp.raise_for_status()
-        return resp.content
+        content_type = resp.headers.get("content-type", "")
+        if "json" in content_type:
+            data = resp.json()
+            recording_url = data.get("url")
+            if not recording_url:
+                return None
+            audio_resp = await client.get(recording_url, headers={"Authorization": f"Bearer {settings.ghl_api_key}"})
+            audio_resp.raise_for_status()
+            return audio_resp.content
+        else:
+            # Audio binary direct teruggegeven
+            return resp.content if len(resp.content) > 1000 else None
 
 
 async def add_contact_note(contact_id: str, note_body: str) -> dict:

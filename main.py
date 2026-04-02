@@ -187,36 +187,37 @@ async def process_call(payload: dict):
             return
 
         # ── Opname zoeken ───────────────────────────────────────
-        # Stap 1: conversation_id uit payload of via API opzoeken
+        audio_bytes = None
+
+        # Stap 1: conversations ophalen voor dit contact
         if not conversation_id:
             print(f"[Verwerking] Geen conversation_id in payload, zoek op via API...")
             conversations = await ghl_client.get_contact_recent_conversations(contact_id)
             print(f"[Verwerking] {len(conversations)} gesprek(ken) gevonden via API")
-            for conv in conversations:
-                conv_id = conv.get("id")
-                if not conv_id:
+        else:
+            conversations = [{"id": conversation_id}]
+
+        # Stap 2: loop door alle berichten en probeer opname te halen
+        for conv in conversations:
+            conv_id = conv.get("id")
+            if not conv_id:
+                continue
+            msgs = await ghl_client.get_conversation_messages(conv_id)
+            msg_types = [m.get("type") for m in msgs]
+            print(f"[Verwerking] Gesprek {conv_id}: {len(msgs)} bericht(en), types: {msg_types}")
+            for msg in reversed(msgs):
+                mid = msg.get("id")
+                if not mid:
                     continue
-                msgs = await ghl_client.get_conversation_messages(conv_id)
-                msg_types = [m.get("type") for m in msgs]
-                print(f"[Verwerking] Gesprek {conv_id}: {len(msgs)} bericht(en), types: {msg_types}")
-                call_msgs = [m for m in msgs if m.get("type") in ("TYPE_CALL", "Call", "call", 1, "1")]
-                if call_msgs:
-                    conversation_id = conv_id
-                    message_id = call_msgs[-1]["id"]
-                    print(f"[Verwerking] Gesprek gevonden via API: {conversation_id}")
+                print(f"[Verwerking] Probeer opname voor bericht {mid} (type {msg.get('type')})")
+                audio_bytes = await ghl_client.get_call_recording(mid)
+                if audio_bytes:
+                    print(f"[Verwerking] Opname gevonden in bericht {mid} ({len(audio_bytes)} bytes)")
                     break
+            if audio_bytes:
+                break
 
-        # Stap 2: recording_url ophalen
-        if not recording_url and conversation_id:
-            if not message_id:
-                msgs = await ghl_client.get_conversation_messages(conversation_id)
-                call_msgs = [m for m in msgs if m.get("type") in ("TYPE_CALL", "Call", "call", 1, "1")]
-                if call_msgs:
-                    message_id = call_msgs[-1]["id"]
-            if message_id:
-                recording_url = await ghl_client.get_call_recording_url(conversation_id, message_id)
-
-        if not recording_url:
+        if not audio_bytes:
             print(f"[Verwerking] Geen opname gevonden → als niet opgenomen behandelen")
             await _handle_no_answer(contact_id, contact_name)
             daily_stats["niet_opgenomen"] += 1
@@ -225,7 +226,6 @@ async def process_call(payload: dict):
         daily_stats["calls_with_recording"] += 1
 
         # ── Transcribeer + analyseer ────────────────────────────
-        audio_bytes = await ghl_client.download_recording(recording_url)
         transcript = await ai_processor.transcribe_audio(audio_bytes)
         print(f"[Verwerking] Transcriptie klaar ({len(transcript)} tekens)")
 
