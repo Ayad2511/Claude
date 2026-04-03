@@ -1,24 +1,31 @@
 """
-Webhook server voor automatische GHL gespreksnotities.
+Gecombineerde server:
+  1. GHL Call Notes AI — verwerkt gespreksopnames via webhooks
+  2. Outreach Systeem — geautomatiseerde email/LinkedIn outreach voor high-ticket closing
 
 Start met:
     uvicorn main:app --host 0.0.0.0 --port 8000
 
-Stel de volgende webhook-URL in GHL in:
-    https://jouw-server.com/webhook/call-completed
+GHL webhook-URL: https://jouw-server.com/webhook/call-completed
+Outreach endpoints: /outreach/now, /scrape/now, /leads, /stats
 """
 
+import io
+import csv
 from contextlib import asynccontextmanager
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
-from fastapi import FastAPI, Request, HTTPException, BackgroundTasks
+from fastapi import FastAPI, Request, HTTPException, BackgroundTasks, UploadFile, File
 from fastapi.responses import JSONResponse
 
 import ghl_client
 import ai_processor
 import slack_reporter
 import stage_advancer
+import database
+import outreach_pipeline
+import scraper
 from config import settings
 
 # ─────────────────────────────────────────────
@@ -60,29 +67,56 @@ async def advance_stages_job():
     print(f"[Scheduler] Doorschuiven klaar: {total} lead(s) verschoven.")
 
 
+async def scrape_job_wrapper():
+    """Dagelijkse scraper-run (07:00)."""
+    print("[Scheduler] Scrape-job gestart")
+    stats = await scraper.run_scrape_job()
+    print(f"[Scheduler] Scrape-job klaar: {stats}")
+
+
+async def outreach_job_wrapper():
+    """Dagelijkse outreach-run (09:00)."""
+    print("[Scheduler] Outreach-job gestart")
+    stats = await outreach_pipeline.run_outreach_job()
+    print(f"[Scheduler] Outreach-job klaar: {stats}")
+
+
 # ─────────────────────────────────────────────
 # App lifecycle
 # ─────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Initialiseer SQLite database voor outreach systeem
+    await database.init_db()
+
     scheduler = AsyncIOScheduler()
 
-    # Dagrapport naar Slack
+    # GHL: Dagrapport naar Slack
     r_hour, r_min = map(int, settings.daily_report_time.split(":"))
     scheduler.add_job(send_and_reset, CronTrigger(hour=r_hour, minute=r_min))
     print(f"[Scheduler] Dagrapport ingepland om {settings.daily_report_time}")
 
-    # Ochtend: niet-opgenomen leads doorschuiven
+    # GHL: Ochtend — niet-opgenomen leads doorschuiven
     a_hour, a_min = map(int, settings.daily_advance_time.split(":"))
     scheduler.add_job(advance_stages_job, CronTrigger(hour=a_hour, minute=a_min))
     print(f"[Scheduler] Doorschuiven ingepland om {settings.daily_advance_time}")
+
+    # Outreach: dagelijkse scrape (07:00)
+    s_hour, s_min = map(int, settings.scrape_run_time.split(":"))
+    scheduler.add_job(scrape_job_wrapper, CronTrigger(hour=s_hour, minute=s_min))
+    print(f"[Scheduler] Scraper ingepland om {settings.scrape_run_time}")
+
+    # Outreach: dagelijkse email/LinkedIn run (09:00)
+    o_hour, o_min = map(int, settings.outreach_run_time.split(":"))
+    scheduler.add_job(outreach_job_wrapper, CronTrigger(hour=o_hour, minute=o_min))
+    print(f"[Scheduler] Outreach ingepland om {settings.outreach_run_time}")
 
     scheduler.start()
     yield
     scheduler.shutdown()
 
 
-app = FastAPI(title="GHL Call Notes AI", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="GHL Call Notes AI + Outreach Systeem", version="2.0.0", lifespan=lifespan)
 
 
 # ─────────────────────────────────────────────
@@ -105,6 +139,101 @@ async def trigger_advance_now():
     """Schuif niet-opgenomen leads direct door (handig voor testen)."""
     stats = await stage_advancer.advance_not_answered_leads()
     return {"status": "klaar", "verschoven": stats}
+
+
+# ─────────────────────────────────────────────
+# Outreach endpoints
+# ─────────────────────────────────────────────
+@app.post("/outreach/now")
+async def trigger_outreach_now(background_tasks: BackgroundTasks):
+    """Start de outreach pipeline direct (handig voor testen)."""
+    background_tasks.add_task(outreach_pipeline.run_outreach_job)
+    return {"status": "gestart", "dry_run": settings.outreach_dry_run}
+
+
+@app.post("/scrape/now")
+async def trigger_scrape_now(background_tasks: BackgroundTasks):
+    """Start de lead scraper direct (handig voor testen)."""
+    background_tasks.add_task(scraper.run_scrape_job)
+    return {"status": "gestart"}
+
+
+@app.post("/leads/import")
+async def import_leads_csv(file: UploadFile = File(...)):
+    """
+    Importeer leads via CSV-bestand.
+    Verplichte kolom: email
+    Optionele kolommen: first_name, last_name, company_name, website, niche, linkedin_url, linkedin_id, notes
+
+    Voorbeeld CSV:
+      email,first_name,last_name,company_name,niche
+      jan@bedrijf.nl,Jan,Pietersen,Bedrijf BV,business coaching
+    """
+    content = await file.read()
+    try:
+        text = content.decode("utf-8-sig")  # utf-8-sig ondersteunt Excel BOM
+    except UnicodeDecodeError:
+        text = content.decode("latin-1")
+
+    reader = csv.DictReader(io.StringIO(text))
+    if "email" not in (reader.fieldnames or []):
+        raise HTTPException(status_code=400, detail="CSV moet een 'email' kolom bevatten")
+
+    nieuw = 0
+    duplicaat = 0
+    ongeldig = 0
+
+    for row in reader:
+        email = row.get("email", "").strip().lower()
+        if not email or "@" not in email:
+            ongeldig += 1
+            continue
+
+        lead = {
+            "email": email,
+            "first_name": row.get("first_name", "").strip(),
+            "last_name": row.get("last_name", "").strip(),
+            "company_name": row.get("company_name", "").strip(),
+            "website": row.get("website", "").strip(),
+            "niche": row.get("niche", "").strip(),
+            "linkedin_url": row.get("linkedin_url", "").strip(),
+            "linkedin_id": row.get("linkedin_id", "").strip(),
+            "notes": row.get("notes", "").strip(),
+            "source": "csv",
+        }
+        new_id = await database.create_lead(lead)
+        if new_id:
+            nieuw += 1
+        else:
+            duplicaat += 1
+
+    return {
+        "status": "klaar",
+        "nieuw": nieuw,
+        "duplicaat": duplicaat,
+        "ongeldig": ongeldig,
+    }
+
+
+@app.get("/leads")
+async def get_leads(limit: int = 200):
+    """Overzicht van alle leads met status."""
+    leads = await database.get_all_leads(limit=limit)
+    return {"totaal": len(leads), "leads": leads}
+
+
+@app.get("/stats")
+async def get_stats():
+    """Statistieken: leads per status + outreach van vandaag."""
+    status_counts = await database.get_status_counts()
+    sent_today = await database.get_sent_today()
+    return {
+        "outreach_vandaag": sent_today,
+        "daglimiet": settings.outreach_daily_max,
+        "dry_run": settings.outreach_dry_run,
+        "leads_per_status": status_counts,
+        "totaal_leads": sum(status_counts.values()),
+    }
 
 
 @app.post("/webhook/call-completed")
