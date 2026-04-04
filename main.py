@@ -17,7 +17,7 @@ from contextlib import asynccontextmanager
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from fastapi import FastAPI, Request, HTTPException, BackgroundTasks, UploadFile, File
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 import ghl_client
 import ai_processor
@@ -220,6 +220,27 @@ async def get_leads(limit: int = 200):
     """Overzicht van alle leads met status."""
     leads = await database.get_all_leads(limit=limit)
     return {"totaal": len(leads), "leads": leads}
+
+
+@app.get("/leads/export")
+async def export_leads_csv():
+    """Download alle leads als CSV — open in Excel of Google Sheets."""
+    leads = await database.get_all_leads(limit=10000)
+    columns = [
+        "id", "first_name", "last_name", "email", "company_name",
+        "website", "linkedin_url", "niche", "source", "status",
+        "stage_updated_at", "created_at", "notes",
+    ]
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=columns, extrasaction="ignore")
+    writer.writeheader()
+    writer.writerows(leads)
+    output.seek(0)
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=leads.csv"},
+    )
 
 
 @app.get("/stats")
