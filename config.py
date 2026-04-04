@@ -38,6 +38,46 @@ class Settings(BaseSettings):
     # === Webhook beveiliging (optioneel) ===
     webhook_secret: str = ""
 
+    # =========================================================
+    # === OUTREACH SYSTEEM (los van GHL) ===
+    # =========================================================
+
+    # Gmail SMTP (App Password, NIET je gewone wachtwoord)
+    # Stap 1: Zet 2-stapsverificatie aan op je Google account
+    # Stap 2: Google Account → Beveiliging → App-wachtwoorden → Mail
+    gmail_address: str = ""
+    gmail_app_password: str = ""
+
+    # Jouw naam als afzender (bijv. "Ahmed Ayad")
+    sender_name: str = ""
+
+    # LinkedIn li_at cookie (browser DevTools → Application → Cookies)
+    linkedin_li_at: str = ""
+
+    # Loom video URL en thumbnail (haal thumbnail op via Loom dashboard)
+    loom_video_url: str = ""
+    loom_thumbnail_url: str = ""
+
+    # Follow-up vertragingen (in dagen)
+    followup1_delay_days: int = 3
+    followup2_delay_days: int = 7
+    followup3_delay_days: int = 14
+    followup4_delay_days: int = 21
+
+    # Dagelijkse limieten en planning
+    outreach_daily_max: int = 15
+    outreach_run_time: str = "09:00"
+    scrape_run_time: str = "07:00"
+
+    # Dry-run modus: emails worden samengesteld maar NIET verstuurd
+    outreach_dry_run: bool = False
+
+    # Scraper: max nieuwe leads per run
+    scrape_max_leads_per_run: int = 30
+
+    # SQLite database pad
+    db_path: str = "outreach.db"
+
     class Config:
         env_file = ".env"
 
