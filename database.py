@@ -42,6 +42,12 @@ async def init_db() -> None:
                 error_message TEXT DEFAULT ''
             )
         """)
+        # Voeg role kolom toe aan bestaande databases (backwards-compatible)
+        try:
+            await db.execute("ALTER TABLE leads ADD COLUMN role TEXT DEFAULT 'general'")
+            await db.commit()
+        except Exception:
+            pass  # Kolom bestaat al
         await db.commit()
     print(f"[Database] Tabellen klaar in {DB_PATH}")
 
@@ -57,8 +63,8 @@ async def create_lead(lead: dict) -> int | None:
                 """
                 INSERT INTO leads
                     (first_name, last_name, email, company_name, website,
-                     linkedin_url, linkedin_id, niche, source)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     linkedin_url, linkedin_id, niche, source, notes, role)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     lead.get("first_name", ""),
@@ -70,6 +76,8 @@ async def create_lead(lead: dict) -> int | None:
                     lead.get("linkedin_id", ""),
                     lead.get("niche", ""),
                     lead.get("source", ""),
+                    lead.get("notes", ""),
+                    lead.get("role", "general"),
                 ),
             )
             await db.commit()

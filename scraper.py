@@ -3,17 +3,18 @@ Lead scraper: haalt contactinfo op via Google en LinkedIn.
 
 Strategie:
   1. Stuur Google-zoekopdrachten voor high-ticket bedrijven in NL
-  2. Bezoek gevonden websites → zoek email en LinkedIn URL
-  3. Zoek aanvullend via LinkedIn profiel-search
-  4. Valideer emaildomeinen via MX record check
-  5. Sla nieuwe leads op in SQLite (duplicaten worden genegeerd)
+  2. Bezoek gevonden websites + subpagina's → zoek ALLE emails + LinkedIn URL
+  3. Detecteer rol per emailadres (ceo / sales / marketing / general)
+  4. Zoek aanvullend via LinkedIn profiel-search
+  5. Valideer emaildomeinen via MX record check
+  6. Sla nieuwe leads op in SQLite (duplicaten worden genegeerd)
 
 Geen gebruik van betaalde scraping tools of GHL.
 """
 
 import asyncio
 import re
-from urllib.parse import quote_plus, urlparse
+from urllib.parse import quote_plus, urljoin, urlparse
 
 import httpx
 from bs4 import BeautifulSoup
@@ -35,6 +36,30 @@ GOOGLE_QUERIES = [
     "mindset coaching premium programma founder NL",
     "online sales coach high end aanbod nederland",
 ]
+
+# ─────────────────────────────────────────────────────────────
+# MULTI-EMAIL CONFIGURATIE
+# ─────────────────────────────────────────────────────────────
+SUBPAGE_PATHS = [
+    "/contact", "/contact-us", "/over-ons", "/about",
+    "/team", "/over", "/mensen", "/contacteer-ons",
+]
+
+ROLE_MAP = {
+    # CEO / oprichter
+    "ceo": "ceo", "founder": "ceo", "oprichter": "ceo", "directeur": "ceo",
+    "owner": "ceo", "eigenaar": "ceo",
+    # Sales
+    "sales": "sales", "verkoop": "sales", "closer": "sales",
+    "acquisitie": "sales", "business": "sales",
+    # Marketing
+    "marketing": "marketing", "groei": "marketing", "growth": "marketing",
+    "communicatie": "marketing",
+    # General (info@ etc.)
+    "info": "general", "contact": "general", "hallo": "general",
+    "hello": "general", "support": "general", "help": "general",
+    "post": "general", "mail": "general",
+}
 
 LINKEDIN_SEARCH_QUERIES = [
     "high ticket coach founder CEO Nederland",
@@ -71,6 +96,79 @@ def _is_valid_email_domain(email: str) -> bool:
 
 def _looks_like_email(text: str) -> bool:
     return bool(re.match(r"[^@\s]+@[^@\s]+\.[^@\s]+", text))
+
+
+def _detect_role(email: str) -> str:
+    """
+    Bepaal de rol van een emailadres op basis van het prefix.
+    Bijv. ceo@bedrijf.nl → 'ceo', sales@bedrijf.nl → 'sales'.
+    Onbekende prefixen → 'general'.
+    """
+    prefix = email.split("@")[0].lower().strip()
+    # Exacte match
+    if prefix in ROLE_MAP:
+        return ROLE_MAP[prefix]
+    # Gedeeltelijke match (bijv. "sales.manager" bevat "sales")
+    for keyword, role in ROLE_MAP.items():
+        if keyword in prefix:
+            return role
+    return "general"
+
+
+def _extract_first_name_from_email(email: str) -> str:
+    """
+    Probeer een voornaam te herleiden uit het emailprefix.
+    jan@         → Jan
+    jan.pietersen@ → Jan
+    jan-pietersen@ → Jan
+    j.pietersen@   → '' (alleen initiaal, overslaan)
+    info@          → '' (rol-adres)
+    """
+    prefix = email.split("@")[0].lower().strip()
+
+    # Rol-adressen hebben geen persoonsnaam
+    for keyword in ROLE_MAP:
+        if prefix == keyword or prefix.startswith(keyword + ".") or prefix.startswith(keyword + "-"):
+            return ""
+
+    # Splits op . of - en pak het eerste deel
+    parts = re.split(r"[.\-_]", prefix)
+    first = parts[0]
+
+    # Overslaan als het maar 1-2 tekens is (initiaal) of cijfers bevat
+    if len(first) <= 2 or re.search(r"\d", first):
+        return ""
+
+    return first.capitalize()
+
+
+def _extract_first_name_from_page(soup: BeautifulSoup, company_name: str) -> str:
+    """
+    Zoek een persoonsnaam in de HTML van een website.
+    Kijkt naar LinkedIn URL structuur en schema.org Person markup.
+    """
+    # LinkedIn URL: /in/jan-pietersen → "Jan"
+    for a in soup.find_all("a", href=True):
+        href = a["href"]
+        if "linkedin.com/in/" in href:
+            slug = href.split("linkedin.com/in/")[-1].split("/")[0].split("?")[0]
+            parts = slug.split("-")
+            if parts and len(parts[0]) > 2:
+                return parts[0].capitalize()
+
+    # Schema.org Person markup
+    for script in soup.find_all("script", type="application/ld+json"):
+        try:
+            import json
+            data = json.loads(script.string or "")
+            if isinstance(data, dict) and data.get("@type") == "Person":
+                name = data.get("name", "")
+                if name:
+                    return name.split()[0].capitalize()
+        except Exception:
+            pass
+
+    return ""
 
 
 # ─────────────────────────────────────────────────────────────
@@ -122,76 +220,115 @@ async def scrape_google(query: str, num: int = 10) -> list[str]:
 # ─────────────────────────────────────────────────────────────
 # WEBSITE ANALYSE
 # ─────────────────────────────────────────────────────────────
-async def extract_from_website(url: str) -> dict:
-    """
-    Bezoek een website en extraheer:
-    - email (mailto: links)
-    - linkedin_url (/in/ of /company/ links)
-    - company_name (title of h1)
-    - website
+def _extract_emails_from_soup(soup: BeautifulSoup) -> set[str]:
+    """Extraheer alle emailadressen uit een BeautifulSoup object."""
+    found: set[str] = set()
 
-    Geeft een dict terug, leeg als de site niet bereikbaar is.
+    # mailto: links
+    for a in soup.find_all("a", href=True):
+        href = a["href"]
+        if href.lower().startswith("mailto:"):
+            candidate = href[7:].split("?")[0].strip().lower()
+            if _looks_like_email(candidate) and "example" not in candidate:
+                found.add(candidate)
+
+    # Regex in platte tekst
+    text = soup.get_text()
+    matches = re.findall(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}", text)
+    for m in matches:
+        m = m.lower()
+        if _looks_like_email(m) and "example" not in m:
+            found.add(m)
+
+    return found
+
+
+async def extract_all_emails_from_website(url: str) -> list[dict]:
     """
+    Bezoek een website (homepage + subpagina's) en extraheer:
+    - ALLE emailadressen met gedetecteerde rol
+    - linkedin_url (eerste gevonden)
+    - company_name (title of h1 van homepage)
+
+    Geeft een lijst van dicts terug — één per uniek emailadres.
+    Lege lijst als de site niet bereikbaar is of geen emails heeft.
+    """
+    base_domain = urlparse(url).scheme + "://" + urlparse(url).netloc
+    all_emails: dict[str, str] = {}  # email → page_url
+    linkedin_url = ""
+    company_name = ""
+    page_first_name = ""  # voornaam gevonden in HTML
+
+    pages_to_visit = [url] + [base_domain + path for path in SUBPAGE_PATHS]
+
     try:
         async with httpx.AsyncClient(headers=HEADERS, follow_redirects=True, timeout=10) as client:
-            resp = await client.get(url)
-            if resp.status_code != 200:
-                return {}
+            for page_url in pages_to_visit:
+                try:
+                    resp = await client.get(page_url)
+                    if resp.status_code != 200:
+                        continue
 
-        soup = BeautifulSoup(resp.text, "lxml")
+                    soup = BeautifulSoup(resp.text, "lxml")
 
-        # Email: zoek mailto: links
-        email = ""
-        for a in soup.find_all("a", href=True):
-            href = a["href"]
-            if href.lower().startswith("mailto:"):
-                candidate = href[7:].split("?")[0].strip()
-                if _looks_like_email(candidate):
-                    # Sla info@, contact@, support@ e.d. over als er betere zijn
-                    if not email or email.startswith(("info@", "contact@", "support@", "hallo@", "hello@")):
-                        email = candidate
+                    # Bedrijfsnaam + LinkedIn alleen van eerste (homepage)
+                    if page_url == url:
+                        title_tag = soup.find("title")
+                        if title_tag:
+                            company_name = (
+                                title_tag.get_text(strip=True)
+                                .split("|")[0].split("-")[0].strip()
+                            )
+                        if not company_name:
+                            h1 = soup.find("h1")
+                            if h1:
+                                company_name = h1.get_text(strip=True)
 
-        # Email ook zoeken in platte tekst (regex)
-        if not email:
-            text = soup.get_text()
-            matches = re.findall(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}", text)
-            for m in matches:
-                if _looks_like_email(m) and "example" not in m:
-                    email = m
-                    break
+                        for a in soup.find_all("a", href=True):
+                            href = a["href"]
+                            if "linkedin.com/in/" in href or "linkedin.com/company/" in href:
+                                linkedin_url = href.split("?")[0]
+                                break
 
-        # LinkedIn URL
-        linkedin_url = ""
-        for a in soup.find_all("a", href=True):
-            href = a["href"]
-            if "linkedin.com/in/" in href or "linkedin.com/company/" in href:
-                linkedin_url = href.split("?")[0]
-                break
+                        # Voornaam uit HTML (alleen van homepage)
+                        page_first_name = _extract_first_name_from_page(soup, company_name)
 
-        # Bedrijfsnaam
-        company_name = ""
-        title_tag = soup.find("title")
-        if title_tag:
-            company_name = title_tag.get_text(strip=True).split("|")[0].split("-")[0].strip()
-        if not company_name:
-            h1 = soup.find("h1")
-            if h1:
-                company_name = h1.get_text(strip=True)
+                    # Emails van elke pagina
+                    page_emails = _extract_emails_from_soup(soup)
+                    for email in page_emails:
+                        if email not in all_emails:
+                            all_emails[email] = page_url
 
-        if not email:
-            return {}
+                    await asyncio.sleep(0.5)  # vriendelijk voor de server
 
-        return {
-            "email": email.lower(),
+                except Exception:
+                    continue  # Subpagina niet bereikbaar — ga door
+
+    except Exception as e:
+        print(f"[Scraper] Websiteanalyse mislukt voor {url}: {e}")
+        return []
+
+    if not all_emails:
+        return []
+
+    results = []
+    for email, _ in all_emails.items():
+        role = _detect_role(email)
+        # Voornaam: probeer eerst uit email-prefix, dan uit pagina-HTML
+        first_name = _extract_first_name_from_email(email) or page_first_name
+        results.append({
+            "email": email,
+            "role": role,
+            "first_name": first_name,
             "linkedin_url": linkedin_url,
             "company_name": company_name[:100],
             "website": url,
             "source": "google",
-        }
+        })
+        name_str = f" → {first_name}" if first_name else ""
+        print(f"[Scraper] Email gevonden: {email} (role:{role}){name_str} — {company_name[:40]}")
 
-    except Exception as e:
-        print(f"[Scraper] Websiteanalyse mislukt voor {url}: {e}")
-        return {}
+    return results
 
 
 # ─────────────────────────────────────────────────────────────
@@ -217,14 +354,13 @@ async def run_scrape_job(max_new_leads: int | None = None) -> dict:
             break
         print(f"[Scraper] Brave API: {query[:60]}")
         urls = await scrape_google(query, num=10)
-        await asyncio.sleep(3)  # Vriendelijk voor Google
+        await asyncio.sleep(3)
 
         for url in urls:
             if stats["nieuw"] >= limit:
                 break
-            data = await extract_from_website(url)
-            if data:
-                candidates.append(data)
+            leads_from_site = await extract_all_emails_from_website(url)
+            candidates.extend(leads_from_site)
             await asyncio.sleep(1)
 
     # ── 2. LinkedIn profiel-search ──────────────────────────

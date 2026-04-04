@@ -72,32 +72,110 @@ def _loom_link() -> str:
 
 
 # ─────────────────────────────────────────────────────────────
-# EMAIL TEMPLATES (basis — worden door Claude verbeterd)
+# MEETING CTA (buzz-mechanisme — zelfde in elke initiële email)
 # ─────────────────────────────────────────────────────────────
-TEMPLATES: dict[str, dict] = {
-    "initial": {
-        "subject": "Idee voor meer betalende klanten bij {company_name}",
-        "html_body": """<p>Hi {first_name},</p>
+def _meeting_cta() -> str:
+    return (
+        "<p>Als je dit in de volgende meeting kan aankaarten, "
+        "zou ik dat enorm waarderen.</p>"
+    )
 
-<p>Ik zag jullie {niche}-aanbod en had direct een concreet idee over hoe
-jullie conversieratio omhoog kan — zonder meer advertentiebudget.</p>
+
+# ─────────────────────────────────────────────────────────────
+# ROLE-BASED SUBJECTS (pattern interrupt — vraag, geen statement)
+# ─────────────────────────────────────────────────────────────
+ROLE_SUBJECTS: dict[str, str] = {
+    "ceo":       "{first_name}, kan ik je iets vragen?",
+    "sales":     "{first_name}, heb je hier al eens over nagedacht?",
+    "marketing": "{first_name}, mag ik even jouw mening?",
+    "general":   "{first_name}, snap jij dit ook?",
+}
+
+# ─────────────────────────────────────────────────────────────
+# ROLE-BASED INITIAL EMAIL BODIES
+# ─────────────────────────────────────────────────────────────
+ROLE_BODIES: dict[str, str] = {
+    "ceo": """<p>Hi {first_name},</p>
+
+<p>Ik stuitte op {company_name} en had direct één vraag: laten jullie
+momenteel omzet liggen in de salesgesprekken?</p>
 
 {loom_block}
 
-<p>In bovenstaande video leg ik in 3 minuten uit hoe ik voor vergelijkbare
-bedrijven 10–30% meer closes haal op dezelfde gesprekken.</p>
+<p>In deze video leg ik in 3 minuten uit hoe ik voor vergelijkbare bedrijven
+10–30% meer closes haal op dezelfde gesprekken — zonder extra advertentiebudget.</p>
 
-<p>Zou je open staan voor een kort gesprek om te kijken of dit voor
-{company_name} ook werkt?</p>
+{meeting_cta}
 
 <p>
   Met vriendelijke groet,<br>
   <strong>{sender_name}</strong>
 </p>
 {footer}""",
-    },
+
+    "sales": """<p>Hi {first_name},</p>
+
+<p>Heb je wel eens berekend hoeveel omzet er per maand blijft liggen
+in jullie salesgesprekken bij {company_name}?</p>
+
+{loom_block}
+
+<p>In deze video laat ik zien hoe ik dat precies heb omgedraaid voor
+vergelijkbare {niche} bedrijven — concreet en meetbaar.</p>
+
+{meeting_cta}
+
+<p>
+  Met vriendelijke groet,<br>
+  <strong>{sender_name}</strong>
+</p>
+{footer}""",
+
+    "marketing": """<p>Hi {first_name},</p>
+
+<p>Jullie genereren warme leads — maar halen jullie er ook het maximale
+uit in het salesgesprek? Dat is de vraag die ik mezelf stelde toen ik
+{company_name} tegenkwam.</p>
+
+{loom_block}
+
+<p>In deze video leg ik uit hoe ik ervoor zorg dat jullie marketinginspanning
+volledig wordt benut in de close.</p>
+
+{meeting_cta}
+
+<p>
+  Met vriendelijke groet,<br>
+  <strong>{sender_name}</strong>
+</p>
+{footer}""",
+
+    "general": """<p>Hi {first_name},</p>
+
+<p>Ik stuitte op {company_name} en had direct een concreet idee om
+jullie salesconversie te verhogen.</p>
+
+{loom_block}
+
+<p>In bovenstaande video leg ik in 3 minuten uit wat ik bedoel en wat
+het in de praktijk oplevert voor {niche} bedrijven.</p>
+
+{meeting_cta}
+
+<p>
+  Met vriendelijke groet,<br>
+  <strong>{sender_name}</strong>
+</p>
+{footer}""",
+}
+
+# ─────────────────────────────────────────────────────────────
+# EMAIL TEMPLATES (basis — worden door Claude verbeterd)
+# ─────────────────────────────────────────────────────────────
+TEMPLATES: dict[str, dict] = {
+    # initial wordt dynamisch samengesteld op basis van rol — zie get_initial_template()
     "followup_1": {
-        "subject": "Re: Idee voor meer betalende klanten bij {company_name}",
+        "subject": "Re: {first_name}",
         "html_body": """<p>Hi {first_name},</p>
 
 <p>Ik stuurde je vorige week een berichtje over het verhogen van jullie
@@ -115,7 +193,7 @@ zien wat ik bedoel.</p>
 {footer}""",
     },
     "followup_2": {
-        "subject": "Wat ik voor een vergelijkbaar {niche} bedrijf deed",
+        "subject": "{first_name}, even terugkomen hierop",
         "html_body": """<p>Hi {first_name},</p>
 
 <p>Ik heb recentelijk samengewerkt met een {niche} business die vergelijkbaar
@@ -137,7 +215,7 @@ niet het maximale eruit in de gesprekken.</p>
 {footer}""",
     },
     "followup_3": {
-        "subject": "Nog 1 plek vrij voor samenwerking",
+        "subject": "{first_name}, nog één keer",
         "html_body": """<p>Hi {first_name},</p>
 
 <p>Ik neem contact op omdat ik vanaf volgende maand ruimte heb voor
@@ -159,7 +237,7 @@ voor we beslissingen nemen.</p>
 {footer}""",
     },
     "followup_4": {
-        "subject": "Afsluiter van mijn kant",
+        "subject": "{first_name}, dan laat ik het hierbij",
         "html_body": """<p>Hi {first_name},</p>
 
 <p>Dit is mijn laatste berichtje.</p>
@@ -200,6 +278,15 @@ LINKEDIN_TEMPLATES: dict[str, str] = {
 # ─────────────────────────────────────────────────────────────
 # TEMPLATE OPVULLEN (basis)
 # ─────────────────────────────────────────────────────────────
+def _get_initial_template(role: str) -> dict:
+    """Geef de role-specifieke initiële email template terug."""
+    role = role if role in ROLE_BODIES else "general"
+    return {
+        "subject": ROLE_SUBJECTS[role],
+        "html_body": ROLE_BODIES[role],
+    }
+
+
 def _fill_template(template: dict, lead: dict) -> dict:
     """Vul de basis-template in met lead-gegevens (geen AI)."""
     vars_ = {
@@ -210,6 +297,7 @@ def _fill_template(template: dict, lead: dict) -> dict:
         "sender_name": settings.sender_name or "Ahmed",
         "loom_block": _loom_block(),
         "loom_link": _loom_link() or "mijn introductievideo",
+        "meeting_cta": _meeting_cta(),
         "footer": _footer(),
     }
     subject = template["subject"].format(**vars_)
@@ -223,13 +311,19 @@ def _fill_template(template: dict, lead: dict) -> dict:
 async def personalize_email(template_key: str, lead: dict) -> dict:
     """
     Personaliseer een emailtemplate met Claude AI.
+    Voor 'initial': selecteer role-based template op basis van lead["role"].
     Fallback op basis-template bij fout of ontbrekende gegevens.
 
     Retourneert: {"subject": str, "html_body": str}
     """
-    template = TEMPLATES.get(template_key)
-    if not template:
-        raise ValueError(f"Onbekende template key: {template_key}")
+    role = lead.get("role", "general")
+
+    if template_key == "initial":
+        template = _get_initial_template(role)
+    else:
+        template = TEMPLATES.get(template_key)
+        if not template:
+            raise ValueError(f"Onbekende template key: {template_key}")
 
     base = _fill_template(template, lead)
 
@@ -239,6 +333,13 @@ async def personalize_email(template_key: str, lead: dict) -> dict:
     niche = lead.get("niche", "")
     if not first_name or not company:
         return base
+
+    role_context = {
+        "ceo":       "De ontvanger is CEO/oprichter. Spreek hem direct aan op groei en resultaat.",
+        "sales":     "De ontvanger zit in sales. Schrijf peer-to-peer, concreet en getallengericht.",
+        "marketing": "De ontvanger is marketing verantwoordelijke. Verbind aan leadkwaliteit en funnel.",
+        "general":   "Toon is zakelijk, nieuwsgierig en laagdrempelig.",
+    }.get(role, "Toon is zakelijk, nieuwsgierig en laagdrempelig.")
 
     system_prompt = (
         "Je bent een senior high-ticket closer die zichzelf positioneert als "
@@ -255,6 +356,7 @@ Naam: {first_name} {lead.get("last_name", "")}
 Bedrijf: {company}
 Niche: {niche or "high-ticket coaching/training"}
 Website: {lead.get("website", "onbekend")}
+Rol ontvanger: {role} — {role_context}
 
 BASIS EMAIL:
 Onderwerp: {base["subject"]}
@@ -263,9 +365,9 @@ Onderwerp: {base["subject"]}
 
 INSTRUCTIES:
 - Verander de opener zodat die specifiek verwijst naar iets van hun bedrijf/niche
-- Houd de HTML-structuur intact (p-tags, loom-blok, footer)
-- Pas de onderwerpregel aan zodat die intrigeert maar niet clickbait-achtig is
-- Maximaal 150 woorden in de body (exclusief footer)
+- Houd de HTML-structuur intact (p-tags, loom-blok, meeting_cta waar aanwezig, footer)
+- De onderwerpregel is een persoonlijke vraag — pas die NIET aan, laat hem staan
+- Maximaal 120 woorden in de body (exclusief footer)
 - Geef ALLEEN geldig JSON terug in dit formaat:
 {{"subject": "...", "html_body": "..."}}"""
 
