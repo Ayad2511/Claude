@@ -75,6 +75,12 @@ class Settings(BaseSettings):
     # Scraper: max nieuwe leads per run
     scrape_max_leads_per_run: int = 30
 
+    # Google Custom Search API (gratis: 100 queries/dag)
+    # Stap 1: console.cloud.google.com → Custom Search API inschakelen → API key aanmaken
+    # Stap 2: programmablesearchengine.google.com → nieuwe zoekmachine → ID kopiëren
+    google_api_key: str = ""
+    google_cse_id: str = ""
+
     # SQLite database pad
     db_path: str = "outreach.db"
 
