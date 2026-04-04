@@ -74,44 +74,48 @@ def _looks_like_email(text: str) -> bool:
 
 
 # ─────────────────────────────────────────────────────────────
-# GOOGLE CUSTOM SEARCH API (betrouwbaar, gratis 100/dag)
+# BRAVE SEARCH API (heel web, gratis 2000/maand, geen IP-blokkering)
 # ─────────────────────────────────────────────────────────────
 async def scrape_google(query: str, num: int = 10) -> list[str]:
     """
-    Zoek via Google Custom Search JSON API.
-    Vereist GOOGLE_API_KEY + GOOGLE_CSE_ID in .env (beide gratis).
+    Zoek via Brave Search API — doorzoekt het hele web zonder beperkingen.
+    Vereist BRAVE_API_KEY in .env (gratis via api.search.brave.com).
     """
-    if not settings.google_api_key or not settings.google_cse_id:
-        print("[Scraper] GOOGLE_API_KEY of GOOGLE_CSE_ID niet ingesteld — scraper overgeslagen")
+    if not settings.brave_api_key:
+        print("[Scraper] BRAVE_API_KEY niet ingesteld — scraper overgeslagen")
         return []
 
-    url = "https://www.googleapis.com/customsearch/v1"
+    url = "https://api.search.brave.com/res/v1/web/search"
     params = {
-        "key": settings.google_api_key,
-        "cx": settings.google_cse_id,
         "q": query,
-        "num": min(num, 10),
-        "lr": "lang_nl",
-        "gl": "nl",
+        "count": min(num, 10),
+        "country": "nl",
+        "search_lang": "nl",
+        "text_decorations": False,
+    }
+    headers = {
+        "Accept": "application/json",
+        "Accept-Encoding": "gzip",
+        "X-Subscription-Token": settings.brave_api_key,
     }
     try:
-        async with httpx.AsyncClient(timeout=15) as client:
+        async with httpx.AsyncClient(headers=headers, timeout=15) as client:
             resp = await client.get(url, params=params)
             if resp.status_code == 429:
-                print(f"[Scraper] Google API dagquota bereikt voor: {query[:40]}")
+                print(f"[Scraper] Brave maandquota bereikt voor: {query[:40]}")
                 return []
             if resp.status_code != 200:
-                print(f"[Scraper] Google API fout {resp.status_code}: {resp.text[:200]}")
+                print(f"[Scraper] Brave API fout {resp.status_code}: {resp.text[:200]}")
                 return []
 
         data = resp.json()
-        items = data.get("items", [])
-        urls = [item["link"] for item in items if "link" in item]
-        print(f"[Scraper] Google API: {len(urls)} URLs gevonden voor '{query[:40]}'")
+        results = data.get("web", {}).get("results", [])
+        urls = [r["url"] for r in results if "url" in r]
+        print(f"[Scraper] Brave API: {len(urls)} URLs gevonden voor '{query[:40]}'")
         return urls
 
     except Exception as e:
-        print(f"[Scraper] Google API fout voor '{query[:40]}': {e}")
+        print(f"[Scraper] Brave API fout voor '{query[:40]}': {e}")
         return []
 
 
@@ -211,7 +215,7 @@ async def run_scrape_job(max_new_leads: int | None = None) -> dict:
     for query in GOOGLE_QUERIES:
         if stats["nieuw"] >= limit:
             break
-        print(f"[Scraper] Google API: {query[:60]}")
+        print(f"[Scraper] Brave API: {query[:60]}")
         urls = await scrape_google(query, num=10)
         await asyncio.sleep(3)  # Vriendelijk voor Google
 

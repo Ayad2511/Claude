@@ -75,9 +75,11 @@ class Settings(BaseSettings):
     # Scraper: max nieuwe leads per run
     scrape_max_leads_per_run: int = 30
 
-    # Google Custom Search API (gratis: 100 queries/dag)
-    # Stap 1: console.cloud.google.com → Custom Search API inschakelen → API key aanmaken
-    # Stap 2: programmablesearchengine.google.com → nieuwe zoekmachine → ID kopiëren
+    # Brave Search API (gratis: 2000 queries/maand, zoekt het hele web)
+    # Aanmaken: api.search.brave.com → Free plan → API key kopiëren
+    brave_api_key: str = ""
+
+    # Google Custom Search API (backup, niet meer nodig als Brave werkt)
     google_api_key: str = ""
     google_cse_id: str = ""
 
