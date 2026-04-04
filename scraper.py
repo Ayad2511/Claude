@@ -74,46 +74,50 @@ def _looks_like_email(text: str) -> bool:
 
 
 # ─────────────────────────────────────────────────────────────
-# DUCKDUCKGO SCRAPER (vervangt Google — geen bot-blokkering)
+# DUCKDUCKGO LITE SCRAPER (text-only, geen bot-challenges)
 # ─────────────────────────────────────────────────────────────
 async def scrape_google(query: str, num: int = 10) -> list[str]:
     """
-    Haal organische resultaten op via DuckDuckGo HTML.
-    DuckDuckGo blokkeert geen scrapers en vereist geen API key.
+    Haal organische resultaten op via DuckDuckGo Lite.
+    De lite-versie heeft geen JavaScript-challenges en werkt goed voor scraping.
     """
-    url = "https://html.duckduckgo.com/html/"
-    data = {"q": query, "kl": "nl-nl"}
+    url = f"https://lite.duckduckgo.com/lite/?q={quote_plus(query)}&kl=nl-nl"
     ddg_headers = {
         **HEADERS,
-        "Content-Type": "application/x-www-form-urlencoded",
-        "Referer": "https://duckduckgo.com/",
+        "Referer": "https://lite.duckduckgo.com/",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     }
     try:
-        async with httpx.AsyncClient(headers=ddg_headers, follow_redirects=True, timeout=15) as client:
-            resp = await client.post(url, data=data)
+        async with httpx.AsyncClient(headers=ddg_headers, follow_redirects=True, timeout=20) as client:
+            resp = await client.get(url)
             if resp.status_code != 200:
-                print(f"[Scraper] DuckDuckGo geeft {resp.status_code} voor: {query[:50]}")
+                print(f"[Scraper] DDG Lite geeft {resp.status_code} voor: {query[:50]}")
                 return []
 
         soup = BeautifulSoup(resp.text, "lxml")
         urls = []
-        # DuckDuckGo HTML resultaten staan in <a class="result__url"> of <a class="result__a">
-        for a in soup.find_all("a", class_=lambda c: c and "result__a" in c):
+        # DDG Lite: resultaat-links staan in <a class="result-link">
+        for a in soup.find_all("a", class_="result-link"):
             href = a.get("href", "")
             parsed = urlparse(href)
             if parsed.scheme in ("http", "https") and "duckduckgo" not in parsed.netloc:
                 urls.append(href)
-        # Fallback: alle externe links
+        # Fallback: zoek op alle links die niet van DDG zijn
         if not urls:
             for a in soup.find_all("a", href=True):
                 href = a["href"]
                 parsed = urlparse(href)
-                if parsed.scheme in ("http", "https") and "duckduckgo" not in parsed.netloc:
+                if (parsed.scheme in ("http", "https")
+                        and "duckduckgo" not in parsed.netloc
+                        and "duck.com" not in parsed.netloc):
                     urls.append(href)
-        return list(dict.fromkeys(urls))[:num]
+
+        found = list(dict.fromkeys(urls))[:num]
+        print(f"[Scraper] DDG Lite: {len(found)} URLs gevonden voor '{query[:40]}'")
+        return found
 
     except Exception as e:
-        print(f"[Scraper] DuckDuckGo fout voor '{query[:40]}': {e}")
+        print(f"[Scraper] DDG Lite fout voor '{query[:40]}': {e}")
         return []
 
 
@@ -213,7 +217,7 @@ async def run_scrape_job(max_new_leads: int | None = None) -> dict:
     for query in GOOGLE_QUERIES:
         if stats["nieuw"] >= limit:
             break
-        print(f"[Scraper] DuckDuckGo: {query[:60]}")
+        print(f"[Scraper] DDG Lite: {query[:60]}")
         urls = await scrape_google(query, num=10)
         await asyncio.sleep(3)  # Vriendelijk voor Google
 
