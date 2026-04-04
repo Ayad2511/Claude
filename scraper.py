@@ -74,36 +74,46 @@ def _looks_like_email(text: str) -> bool:
 
 
 # ─────────────────────────────────────────────────────────────
-# GOOGLE SCRAPER
+# DUCKDUCKGO SCRAPER (vervangt Google — geen bot-blokkering)
 # ─────────────────────────────────────────────────────────────
 async def scrape_google(query: str, num: int = 10) -> list[str]:
     """
-    Haal organische Google-resultaten op voor een zoekopdracht.
-    Geeft een lijst van URLs terug (geen advertenties).
+    Haal organische resultaten op via DuckDuckGo HTML.
+    DuckDuckGo blokkeert geen scrapers en vereist geen API key.
     """
-    url = f"https://www.google.com/search?q={quote_plus(query)}&num={num}&hl=nl"
+    url = "https://html.duckduckgo.com/html/"
+    data = {"q": query, "kl": "nl-nl"}
+    ddg_headers = {
+        **HEADERS,
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Referer": "https://duckduckgo.com/",
+    }
     try:
-        async with httpx.AsyncClient(headers=HEADERS, follow_redirects=True, timeout=15) as client:
-            resp = await client.get(url)
+        async with httpx.AsyncClient(headers=ddg_headers, follow_redirects=True, timeout=15) as client:
+            resp = await client.post(url, data=data)
             if resp.status_code != 200:
-                print(f"[Scraper] Google geeft {resp.status_code} voor: {query[:50]}")
+                print(f"[Scraper] DuckDuckGo geeft {resp.status_code} voor: {query[:50]}")
                 return []
 
         soup = BeautifulSoup(resp.text, "lxml")
         urls = []
-        for a in soup.find_all("a", href=True):
-            href = a["href"]
-            # Google wraps organische links in /url?q=...
-            if href.startswith("/url?q="):
-                actual = href[7:].split("&")[0]
-                parsed = urlparse(actual)
-                # Filter Google's eigen domeinen en advertentie-links
-                if parsed.scheme in ("http", "https") and "google" not in parsed.netloc:
-                    urls.append(actual)
-        return list(dict.fromkeys(urls))[:num]  # Dedupliceren + limiet
+        # DuckDuckGo HTML resultaten staan in <a class="result__url"> of <a class="result__a">
+        for a in soup.find_all("a", class_=lambda c: c and "result__a" in c):
+            href = a.get("href", "")
+            parsed = urlparse(href)
+            if parsed.scheme in ("http", "https") and "duckduckgo" not in parsed.netloc:
+                urls.append(href)
+        # Fallback: alle externe links
+        if not urls:
+            for a in soup.find_all("a", href=True):
+                href = a["href"]
+                parsed = urlparse(href)
+                if parsed.scheme in ("http", "https") and "duckduckgo" not in parsed.netloc:
+                    urls.append(href)
+        return list(dict.fromkeys(urls))[:num]
 
     except Exception as e:
-        print(f"[Scraper] Google fout voor '{query[:40]}': {e}")
+        print(f"[Scraper] DuckDuckGo fout voor '{query[:40]}': {e}")
         return []
 
 
@@ -203,7 +213,7 @@ async def run_scrape_job(max_new_leads: int | None = None) -> dict:
     for query in GOOGLE_QUERIES:
         if stats["nieuw"] >= limit:
             break
-        print(f"[Scraper] Google: {query[:60]}")
+        print(f"[Scraper] DuckDuckGo: {query[:60]}")
         urls = await scrape_google(query, num=10)
         await asyncio.sleep(3)  # Vriendelijk voor Google
 
