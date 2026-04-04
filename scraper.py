@@ -115,6 +115,62 @@ def _detect_role(email: str) -> str:
     return "general"
 
 
+def _extract_first_name_from_email(email: str) -> str:
+    """
+    Probeer een voornaam te herleiden uit het emailprefix.
+    jan@         → Jan
+    jan.pietersen@ → Jan
+    jan-pietersen@ → Jan
+    j.pietersen@   → '' (alleen initiaal, overslaan)
+    info@          → '' (rol-adres)
+    """
+    prefix = email.split("@")[0].lower().strip()
+
+    # Rol-adressen hebben geen persoonsnaam
+    for keyword in ROLE_MAP:
+        if prefix == keyword or prefix.startswith(keyword + ".") or prefix.startswith(keyword + "-"):
+            return ""
+
+    # Splits op . of - en pak het eerste deel
+    parts = re.split(r"[.\-_]", prefix)
+    first = parts[0]
+
+    # Overslaan als het maar 1-2 tekens is (initiaal) of cijfers bevat
+    if len(first) <= 2 or re.search(r"\d", first):
+        return ""
+
+    return first.capitalize()
+
+
+def _extract_first_name_from_page(soup: BeautifulSoup, company_name: str) -> str:
+    """
+    Zoek een persoonsnaam in de HTML van een website.
+    Kijkt naar LinkedIn URL structuur en schema.org Person markup.
+    """
+    # LinkedIn URL: /in/jan-pietersen → "Jan"
+    for a in soup.find_all("a", href=True):
+        href = a["href"]
+        if "linkedin.com/in/" in href:
+            slug = href.split("linkedin.com/in/")[-1].split("/")[0].split("?")[0]
+            parts = slug.split("-")
+            if parts and len(parts[0]) > 2:
+                return parts[0].capitalize()
+
+    # Schema.org Person markup
+    for script in soup.find_all("script", type="application/ld+json"):
+        try:
+            import json
+            data = json.loads(script.string or "")
+            if isinstance(data, dict) and data.get("@type") == "Person":
+                name = data.get("name", "")
+                if name:
+                    return name.split()[0].capitalize()
+        except Exception:
+            pass
+
+    return ""
+
+
 # ─────────────────────────────────────────────────────────────
 # GOOGLE SCRAPER
 # ─────────────────────────────────────────────────────────────
@@ -189,6 +245,7 @@ async def extract_all_emails_from_website(url: str) -> list[dict]:
     all_emails: dict[str, str] = {}  # email → page_url
     linkedin_url = ""
     company_name = ""
+    page_first_name = ""  # voornaam gevonden in HTML
 
     pages_to_visit = [url] + [base_domain + path for path in SUBPAGE_PATHS]
 
@@ -221,6 +278,9 @@ async def extract_all_emails_from_website(url: str) -> list[dict]:
                                 linkedin_url = href.split("?")[0]
                                 break
 
+                        # Voornaam uit HTML (alleen van homepage)
+                        page_first_name = _extract_first_name_from_page(soup, company_name)
+
                     # Emails van elke pagina
                     page_emails = _extract_emails_from_soup(soup)
                     for email in page_emails:
@@ -242,15 +302,19 @@ async def extract_all_emails_from_website(url: str) -> list[dict]:
     results = []
     for email, _ in all_emails.items():
         role = _detect_role(email)
+        # Voornaam: probeer eerst uit email-prefix, dan uit pagina-HTML
+        first_name = _extract_first_name_from_email(email) or page_first_name
         results.append({
             "email": email,
             "role": role,
+            "first_name": first_name,
             "linkedin_url": linkedin_url,
             "company_name": company_name[:100],
             "website": url,
             "source": "google",
         })
-        print(f"[Scraper] Email gevonden: {email} (role:{role}) — {company_name[:40]}")
+        name_str = f" → {first_name}" if first_name else ""
+        print(f"[Scraper] Email gevonden: {email} (role:{role}){name_str} — {company_name[:40]}")
 
     return results
 
