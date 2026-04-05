@@ -48,6 +48,9 @@ class Settings(BaseSettings):
     gmail_address: str = ""
     gmail_app_password: str = ""
 
+    # Resend API (HTTP email — werkt op Railway, vervangt SMTP)
+    resend_api_key: str = ""
+
     # Jouw naam als afzender (bijv. "Ahmed Ayad")
     sender_name: str = ""
 

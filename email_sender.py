@@ -1,98 +1,36 @@
 """
-Gmail SMTP email verzender met maximale deliverability.
+Email verzender met Resend HTTP API (werkt op Railway).
+
+Resend gebruikt HTTPS (poort 443) in plaats van SMTP (465/587),
+waardoor Railway het niet blokkeert.
 
 Setup:
-  1. Zet 2-stapsverificatie aan op je Google account
-  2. Google Account → Beveiliging → App-wachtwoorden → Mail → genereer
-  3. Sla het 16-cijferige wachtwoord op in GMAIL_APP_PASSWORD
-
-Deliverability maatregelen ingebouwd:
-  - Multipart email (HTML + plain text alternatief)
-  - Correcte From/Reply-To/List-Unsubscribe headers
-  - Bounce detectie en logging
-  - 45-90 seconden delay na verzending (in outreach_pipeline.py)
+  1. Maak account aan op resend.com
+  2. Voeg je domein toe en verifieer het (DNS records)
+  3. Maak een API key aan
+  4. Zet RESEND_API_KEY in Railway variables
+  5. Zet GMAIL_ADDRESS als from-adres (moet geverifieerd domein zijn in Resend)
 """
 
 import asyncio
-import smtplib
-import ssl
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
-from email.utils import formatdate, make_msgid
+import re
+
+import httpx
 
 import database
 from config import settings
 
+RESEND_API_URL = "https://api.resend.com/emails"
+
 
 def _html_to_plain(html_body: str) -> str:
     """Simpele HTML → plain text conversie voor het tekst-alternatief."""
-    import re
-    # Verwijder style/script blokken
     text = re.sub(r"<(style|script)[^>]*>.*?</(style|script)>", "", html_body, flags=re.DOTALL | re.IGNORECASE)
-    # Vervang <br> en <p> door newlines
     text = re.sub(r"<br\s*/?>", "\n", text, flags=re.IGNORECASE)
     text = re.sub(r"</p>", "\n\n", text, flags=re.IGNORECASE)
-    # Verwijder alle overige HTML tags
     text = re.sub(r"<[^>]+>", "", text)
-    # Normaliseer witruimte
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
-
-
-def _build_message(to_email: str, subject: str, html_body: str) -> MIMEMultipart:
-    """
-    Bouw een volledig MIME bericht op met:
-    - Correct From display name
-    - Reply-To
-    - List-Unsubscribe (GDPR/CAN-SPAM vereiste)
-    - HTML + plain text alternatief
-    """
-    msg = MIMEMultipart("alternative")
-    msg["From"] = f"{settings.sender_name} <{settings.gmail_address}>"
-    msg["To"] = to_email
-    msg["Subject"] = subject
-    msg["Reply-To"] = settings.gmail_address
-    msg["Date"] = formatdate(localtime=True)
-    msg["Message-ID"] = make_msgid(domain=settings.gmail_address.split("@")[-1])
-    msg["List-Unsubscribe"] = (
-        f"<mailto:{settings.gmail_address}?subject=uitschrijven>"
-    )
-
-    plain_text = _html_to_plain(html_body)
-    msg.attach(MIMEText(plain_text, "plain", "utf-8"))
-    msg.attach(MIMEText(html_body, "html", "utf-8"))
-
-    return msg
-
-
-def _send_sync(to_email: str, subject: str, html_body: str) -> tuple[bool, str]:
-    """
-    Synchrone SMTP verzending (wordt uitgevoerd in een thread executor).
-    Geeft (True, "") bij succes, (False, foutmelding) bij fout.
-    """
-    if not settings.gmail_address or not settings.gmail_app_password:
-        return False, "GMAIL_ADDRESS of GMAIL_APP_PASSWORD niet ingesteld"
-
-    msg = _build_message(to_email, subject, html_body)
-    context = ssl.create_default_context()
-
-    try:
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context) as server:
-            server.login(settings.gmail_address, settings.gmail_app_password)
-            server.sendmail(
-                settings.gmail_address,
-                [to_email],
-                msg.as_string(),
-            )
-        return True, ""
-    except smtplib.SMTPRecipientsRefused as e:
-        return False, f"Ongeldig emailadres (bounce): {e}"
-    except smtplib.SMTPAuthenticationError as e:
-        return False, f"Gmail authenticatie mislukt: {e}"
-    except smtplib.SMTPException as e:
-        return False, f"SMTP fout: {e}"
-    except Exception as e:
-        return False, f"Onverwachte fout: {e}"
 
 
 async def send_email(
@@ -103,9 +41,9 @@ async def send_email(
     template_key: str = "onbekend",
 ) -> bool:
     """
-    Verstuur een email asynchroon via Gmail SMTP.
+    Verstuur een email via Resend HTTP API.
 
-    Als dry_run=True in config: log de email maar verstuur niet.
+    Als dry_run=True: log de email maar verstuur niet.
     Als lead_id opgegeven: registreer resultaat in outreach_log.
 
     Geeft True bij succes, False bij fout.
@@ -116,17 +54,55 @@ async def send_email(
             await database.log_outreach(lead_id, "email", template_key, True, "dry-run")
         return True
 
-    loop = asyncio.get_event_loop()
-    success, error = await loop.run_in_executor(
-        None, _send_sync, to_email, subject, html_body
-    )
+    if not settings.resend_api_key:
+        print(f"[Email] FOUT: RESEND_API_KEY niet ingesteld")
+        if lead_id:
+            await database.log_outreach(lead_id, "email", template_key, False, "RESEND_API_KEY ontbreekt")
+        return False
 
-    if success:
-        print(f"[Email] Verstuurd naar {to_email} | Onderwerp: {subject}")
-    else:
+    if not settings.gmail_address:
+        print(f"[Email] FOUT: GMAIL_ADDRESS niet ingesteld (gebruikt als from-adres)")
+        return False
+
+    from_address = f"{settings.sender_name} <{settings.gmail_address}>" if settings.sender_name else settings.gmail_address
+
+    payload = {
+        "from": from_address,
+        "to": [to_email],
+        "subject": subject,
+        "html": html_body,
+        "text": _html_to_plain(html_body),
+        "headers": {
+            "List-Unsubscribe": f"<mailto:{settings.gmail_address}?subject=uitschrijven>",
+        },
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.post(
+                RESEND_API_URL,
+                json=payload,
+                headers={
+                    "Authorization": f"Bearer {settings.resend_api_key}",
+                    "Content-Type": "application/json",
+                },
+            )
+
+        if resp.status_code in (200, 201):
+            print(f"[Email] Verstuurd naar {to_email} | Onderwerp: {subject}")
+            if lead_id:
+                await database.log_outreach(lead_id, "email", template_key, True)
+            return True
+        else:
+            error = f"Resend fout {resp.status_code}: {resp.text[:200]}"
+            print(f"[Email] FOUT naar {to_email}: {error}")
+            if lead_id:
+                await database.log_outreach(lead_id, "email", template_key, False, error)
+            return False
+
+    except Exception as e:
+        error = f"Onverwachte fout: {e}"
         print(f"[Email] FOUT naar {to_email}: {error}")
-
-    if lead_id:
-        await database.log_outreach(lead_id, "email", template_key, success, error)
-
-    return success
+        if lead_id:
+            await database.log_outreach(lead_id, "email", template_key, False, error)
+        return False
