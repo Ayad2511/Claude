@@ -16,6 +16,9 @@ from contextlib import asynccontextmanager
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+import pytz
+
+NL_TZ = pytz.timezone("Europe/Amsterdam")
 from fastapi import FastAPI, Request, HTTPException, BackgroundTasks, UploadFile, File
 from fastapi.responses import JSONResponse
 
@@ -89,27 +92,27 @@ async def lifespan(app: FastAPI):
     # Initialiseer SQLite database voor outreach systeem
     await database.init_db()
 
-    scheduler = AsyncIOScheduler()
+    scheduler = AsyncIOScheduler(timezone=NL_TZ)
 
     # GHL: Dagrapport naar Slack
     r_hour, r_min = map(int, settings.daily_report_time.split(":"))
-    scheduler.add_job(send_and_reset, CronTrigger(hour=r_hour, minute=r_min))
-    print(f"[Scheduler] Dagrapport ingepland om {settings.daily_report_time}")
+    scheduler.add_job(send_and_reset, CronTrigger(hour=r_hour, minute=r_min, timezone=NL_TZ))
+    print(f"[Scheduler] Dagrapport ingepland om {settings.daily_report_time} NL")
 
     # GHL: Ochtend — niet-opgenomen leads doorschuiven
     a_hour, a_min = map(int, settings.daily_advance_time.split(":"))
-    scheduler.add_job(advance_stages_job, CronTrigger(hour=a_hour, minute=a_min))
-    print(f"[Scheduler] Doorschuiven ingepland om {settings.daily_advance_time}")
+    scheduler.add_job(advance_stages_job, CronTrigger(hour=a_hour, minute=a_min, timezone=NL_TZ))
+    print(f"[Scheduler] Doorschuiven ingepland om {settings.daily_advance_time} NL")
 
-    # Outreach: dagelijkse scrape (07:00)
+    # Outreach: dagelijkse scrape (07:00 NL)
     s_hour, s_min = map(int, settings.scrape_run_time.split(":"))
-    scheduler.add_job(scrape_job_wrapper, CronTrigger(hour=s_hour, minute=s_min))
-    print(f"[Scheduler] Scraper ingepland om {settings.scrape_run_time}")
+    scheduler.add_job(scrape_job_wrapper, CronTrigger(hour=s_hour, minute=s_min, timezone=NL_TZ))
+    print(f"[Scheduler] Scraper ingepland om {settings.scrape_run_time} NL")
 
-    # Outreach: dagelijkse email/LinkedIn run (09:00)
+    # Outreach: dagelijkse email/LinkedIn run (09:00 NL)
     o_hour, o_min = map(int, settings.outreach_run_time.split(":"))
-    scheduler.add_job(outreach_job_wrapper, CronTrigger(hour=o_hour, minute=o_min))
-    print(f"[Scheduler] Outreach ingepland om {settings.outreach_run_time}")
+    scheduler.add_job(outreach_job_wrapper, CronTrigger(hour=o_hour, minute=o_min, timezone=NL_TZ))
+    print(f"[Scheduler] Outreach ingepland om {settings.outreach_run_time} NL")
 
     scheduler.start()
     yield
