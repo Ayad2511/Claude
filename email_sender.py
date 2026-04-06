@@ -66,14 +66,17 @@ async def send_email(
 
     from_address = f"{settings.sender_name} <{settings.gmail_address}>" if settings.sender_name else settings.gmail_address
 
+    reply_to = settings.reply_to_email or settings.gmail_address
+
     payload = {
         "from": from_address,
         "to": [to_email],
+        "reply_to": reply_to,
         "subject": subject,
         "html": html_body,
         "text": _html_to_plain(html_body),
         "headers": {
-            "List-Unsubscribe": f"<mailto:{settings.gmail_address}?subject=uitschrijven>",
+            "List-Unsubscribe": f"<mailto:{reply_to}?subject=uitschrijven>",
         },
     }
 
