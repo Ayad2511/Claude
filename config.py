@@ -50,6 +50,8 @@ class Settings(BaseSettings):
 
     # Resend API (HTTP email — werkt op Railway, vervangt SMTP)
     resend_api_key: str = ""
+    # Reply-To adres (bijv. je Gmail) zodat antwoorden daar binnenkomen
+    reply_to_email: str = ""
 
     # Jouw naam als afzender (bijv. "Ahmed Ayad")
     sender_name: str = ""
