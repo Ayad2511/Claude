@@ -228,7 +228,10 @@ def _extract_emails_from_soup(soup: BeautifulSoup) -> set[str]:
     for a in soup.find_all("a", href=True):
         href = a["href"]
         if href.lower().startswith("mailto:"):
-            candidate = href[7:].split("?")[0].strip().lower()
+            from urllib.parse import unquote
+            candidate = unquote(href[7:].split("?")[0]).strip().lower()
+            # Verwijder eventuele spaties en onzichtbare tekens
+            candidate = re.sub(r"\s+", "", candidate)
             if _looks_like_email(candidate) and "example" not in candidate:
                 found.add(candidate)
 
