@@ -1,0 +1,52 @@
+services:
+  - type: web
+    name: nextmove-outreach
+    env: node
+    region: frankfurt
+    plan: free
+    buildCommand: npm install && npm run build && npm run build:server
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: nextmove-db
+          property: connectionString
+      - key: NODE_ENV
+        value: production
+      - key: NEXT_TELEMETRY_DISABLED
+        value: "1"
+      # API Keys — vul in via Render dashboard zodra accounts klaar zijn
+      - key: CLAY_API_KEY
+        value: ""
+      - key: CLAY_TABLE_ID
+        value: ""
+      - key: LEMLIST_API_KEY
+        value: ""
+      - key: LEMLIST_CAMPAIGN_ID
+        value: ""
+      - key: PHANTOMBUSTER_API_KEY
+        value: ""
+      - key: PHANTOMBUSTER_LINKEDIN_AGENT_ID
+        value: ""
+      - key: PHANTOMBUSTER_INSTAGRAM_AGENT_ID
+        value: ""
+      - key: HEYGEN_API_KEY
+        value: ""
+      - key: HEYGEN_TEMPLATE_ID
+        value: ""
+      - key: HEYGEN_WEBHOOK_SECRET
+        value: ""
+      - key: CRON_SECRET
+        generateValue: true
+      - key: NEXTAUTH_SECRET
+        generateValue: true
+      - key: NEXTAUTH_URL
+        value: "https://nextmove-outreach.onrender.com"
+
+databases:
+  - name: nextmove-db
+    databaseName: nextmove
+    user: nextmove
+    plan: free
+    region: frankfurt
